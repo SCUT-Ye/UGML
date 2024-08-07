@@ -1,0 +1,5 @@
+monai
+nibabel
+tqdm
+einops
+tensorboardX
