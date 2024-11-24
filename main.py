@@ -7,7 +7,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn.parallel
 import torch.utils.data.distributed
-from networks.nnUnet import BasicUNet
+from networks.UGML import UGML
 from optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from trainer import run_training
 from utils.data_utils import get_loader
@@ -44,7 +44,7 @@ parser.add_argument("--dist-url", default="tcp://127.0.0.1:23456", type=str, hel
 parser.add_argument("--dist-backend", default="nccl", type=str, help="distributed backend")
 parser.add_argument("--workers", default=4, type=int, help="number of workers")
 
-parser.add_argument("--model_name", default="nnUNet", type=str, help="model name")
+parser.add_argument("--model_name", default="UGML", type=str, help="model name")
 parser.add_argument("--spatial_dims", default=3, type=int, help="spatial_dims")
 parser.add_argument("--features", default=(32, 64, 128, 256, 512, 32), type=int, help="features")
 parser.add_argument("--in_channels", default=1, type=int, help="number of input channels")
@@ -117,9 +117,9 @@ def main_worker(gpu, args):
     # ==================================================================
     # load model
     # ==================================================================
-    if (args.model_name is None) or args.model_name == "nnUNet":
+    if (args.model_name is None) or args.model_name == "UGML":
         print(args.model_name)
-        model = BasicUNet(
+        model = UGML(
             spatial_dims=args.spatial_dims,
             in_channels=args.in_channels,
             out_channels=args.out_channels,
