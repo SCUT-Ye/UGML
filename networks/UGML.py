@@ -7,7 +7,7 @@ from monai.networks.blocks import Convolution, UpSample
 from monai.networks.layers.factories import Conv, Pool
 from monai.utils import deprecated_arg, ensure_tuple_rep
 
-__all__ = ["BasicUnet", "Basicunet", "basicunet", "BasicUNet"]
+__all__ = ["UGML", "ugml", "nnUnet(UG)"]
 
 
 class TwoConv(nn.Sequential):
@@ -161,10 +161,8 @@ class UpCat(nn.Module):
         return x
 
 
-class BasicUNet(nn.Module):
-    @deprecated_arg(
-        name="dimensions", new_name="spatial_dims", since="0.6", msg_suffix="Please use `spatial_dims` instead."
-    )
+class UGML(nn.Module):
+
     def __init__(
         self,
         spatial_dims: int = 3,
@@ -179,14 +177,6 @@ class BasicUNet(nn.Module):
         dimensions: Optional[int] = None,
     ):
         """
-        A UNet implementation with 1D/2D/3D supports.
-
-        Based on:
-
-            Falk et al. "U-Net – Deep Learning for Cell Counting, Detection, and
-            Morphometry". Nature Methods 16, 67–70 (2019), DOI:
-            http://dx.doi.org/10.1038/s41592-018-0261-2
-
         Args:
             spatial_dims: number of spatial dimensions. Defaults to 3 for spatial 3D inputs.
             in_channels: number of input channels. Defaults to 1.
@@ -205,21 +195,6 @@ class BasicUNet(nn.Module):
             dropout: dropout ratio. Defaults to no dropout.
             upsample: upsampling mode, available options are
                 ``"deconv"``, ``"pixelshuffle"``, ``"nontrainable"``.
-
-        .. deprecated:: 0.6.0
-            ``dimensions`` is deprecated, use ``spatial_dims`` instead.
-
-        Examples::
-
-            # for spatial 2D
-            >>> net = BasicUNet(spatial_dims=2, features=(64, 128, 256, 512, 1024, 128))
-
-            # for spatial 2D, with group norm
-            >>> net = BasicUNet(spatial_dims=2, features=(64, 128, 256, 512, 1024, 128), norm=("group", {"num_groups": 4}))
-
-            # for spatial 3D
-            >>> net = BasicUNet(spatial_dims=3, features=(32, 32, 64, 128, 256, 32))
-
         See Also
 
             - :py:class:`monai.networks.nets.DynUNet`
@@ -230,7 +205,7 @@ class BasicUNet(nn.Module):
         if dimensions is not None:
             spatial_dims = dimensions
         fea = ensure_tuple_rep(features, 6)
-        print(f"BasicUNet features: {fea}.")
+        print(f"UGML features: {fea}.")
 
         self.conv_0 = TwoConv(spatial_dims, in_channels, features[0], act, norm, bias, dropout)
         self.down_1 = Down(spatial_dims, fea[0], fea[1], act, norm, bias, dropout)
@@ -265,7 +240,7 @@ class BasicUNet(nn.Module):
         evidence = F.softplus(input)
         return evidence
     
-    def forward(self, x: torch.Tensor,mode='val'):
+    def forward(self, x: torch.Tensor):
         """
         Args:
             x: input should have spatially N dimensions
@@ -315,13 +290,4 @@ class BasicUNet(nn.Module):
         out = self.outconv(m)
 
         # out = self.infer(logits)
-        # if mode =='train':
-        #     return out
-        # else:
         return out
-
-
-BasicUnet = Basicunet = basicunet = BasicUNet
-
-
-
