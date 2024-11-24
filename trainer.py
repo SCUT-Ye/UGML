@@ -26,8 +26,8 @@ def un_loss(uncertainty,un_gt,eps=1e-5):
     similarity = intersection / union
     return similarity
 
-def focal_loss(Dirichlet,gt):
-    criterion_fl = FocalLoss(14)
+def focal_loss(Dirichlet,gt,args):
+    criterion_fl = FocalLoss(args.out_channels)
     loss = criterion_fl(Dirichlet, gt)
     return loss 
 
@@ -148,7 +148,7 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, tau,args):
     start_time = time.time()
     run_loss = AverageMeter()
     b_mass = np.zeros((args.sw_batch_size,args.out_channels,args.roi_x,args.roi_y,args.roi_z))
-    tau = torch.from_numpy(tau).view(4, 14, 1, 1, 1).expand(4, 14, args.roi_x,args.roi_y,args.roi_z)
+    tau = torch.from_numpy(tau).view(4, args.out_channels, 1, 1, 1).expand(4, args.out_channels, args.roi_x,args.roi_y,args.roi_z)
     tau = tau.cuda(args.rank)
 
     # post_label = AsDiscrete(to_onehot=args.out_channels)
@@ -172,7 +172,7 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, tau,args):
 
             # end_time = time.time() - start_time
             # print(end_time)
-            # exit()
+
             evidences = F.softplus(logits)
             # backbone_pred = F.softmax(logits,1)
             alpha = evidences+1
@@ -182,42 +182,11 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, tau,args):
             alpha[alpha < tau] = 1
             S = torch.sum(alpha, dim=1, keepdim=True) #Dirichlet intensity 
             
-            # E = alpha - 1 
-            # b = E / (S.expand(E.shape)) # belief mass
-            # print(torch.max(b))
             
             u = args.out_channels / S
             loss_un = un_loss(u,un_gt)
-
-            # loss_diga = digama_loss(alpha,target.to(torch.int64),args)
-            # loss_focal = focal_loss(alpha,target)
             loss_kl = KL(alpha,target.to(torch.int64),args.out_channels,epoch,(args.max_epochs)/2)
-            # loss_AU,annealing_AU = AU_loss(alpha,target.to(torch.int64),args.out_channels,epoch,args.max_epochs)
-            # loss = 0.5 * loss_func(logits, target) + 0.4 * loss_un + 0.1 * loss_kl
-            # loss =  loss_func(logits, target)
-
-            # loss =  loss_func(logits, target) + 0.3 * loss_un + 0.2 * loss_kl #组2
-            loss =  0.5*loss_func(logits, target) + 0.3 * loss_un + 0.2 * loss_kl #组1
-            # loss =  loss_func(logits, target) + 0.1 * loss_un + 0.2 * loss_kl #组3
-            # loss =  0.7* loss_func(logits, target) + 0.1 * loss_un + 0.2 * loss_kl #组4
-            # loss =   loss_func(logits, target) + 0.2 * loss_un + 0.3 * loss_kl #组5
-            # loss =  0.5 *loss_func(logits, target) + 0.2 * loss_un + 0.3 * loss_kl #组6
-
-            # loss = loss_func(logits, target) + loss_un + loss_focal
-            # loss = loss_func(logits, target) + loss_diga + loss_kl*0.2 #TB
-            # loss = (1 - annealing_AU)*loss_func(logits, target) + loss_diga + loss_kl + loss_AU #TMSU
-            # loss = torch.mean(loss)
-            # loss = dce_evidence_u_loss(target.to(torch.int64), alpha, args.out_channels, epoch, (args.max_epochs)/2,
-            #                            (args.max_epochs),1e-10,False,evidences,backbone_pred)
-            # loss = torch.mean(loss)
-            # for PU 
-            # onehot_target = get_soft_label(target, args.out_channels).permute(0, 4, 1, 2,3)
-            
-            # model.forward(data, onehot_target, training=True)
-            # elbo = model.elbo(onehot_target)
-            # reg_loss = l2_regularisation(model.posterior) + l2_regularisation(model.prior) + l2_regularisation(
-            #     model.fcomb.layers)
-            # loss = -elbo + 1e-5 * reg_loss
+            loss =  0.5*loss_func(logits, target) + 0.3 * loss_un + 0.2 * loss_kl 
             
         if args.amp:
             scaler.scale(loss).backward()
@@ -237,9 +206,6 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, tau,args):
             print(
                 "Epoch {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(loader)),
                 "loss: {:.4f}".format(run_loss.avg),
-                "uncertainty:{:.3f}".format(torch.min(u)),
-                # "alpha_avg:{:.3f}".format(torch.mean(alpha)),
-                # "alpha_max:{:.3f}".format(torch.max(alpha)),
                 "time {:.2f}s".format(time.time() - start_time),
             )
         start_time = time.time()
@@ -247,7 +213,6 @@ def train_epoch(model, loader, optimizer, scaler, epoch, loss_func, tau,args):
         param.grad = None
     b_mass = b_mass/(idx+1)
     return run_loss.avg,b_mass
-    # return run_loss.avg
 
 def val_epoch(model, loader, epoch, acc_func, args, model_inferer, post_label=None, post_pred=None):
     model.eval()
@@ -266,11 +231,8 @@ def val_epoch(model, loader, epoch, acc_func, args, model_inferer, post_label=No
             with autocast(enabled=args.amp):
                 if model_inferer is not None:
                     logits = model_inferer(data)
-                    # logits = model_inferer(data,testing=True) #for PU
-                    # logits = model.sample_m(data,m=8,testing=True) #for PU
                 else:
                     logits = model(data,'val')
-                    # logits = model.sample_m(data,m=8,testing=True) #for PU
             if not logits.is_cuda:
                 target = target.cpu()
             val_labels_list = decollate_batch(target)
@@ -296,8 +258,6 @@ def val_epoch(model, loader, epoch, acc_func, args, model_inferer, post_label=No
             else:
                 acc_list = acc.detach().cpu().numpy()
                 avg_acc = np.mean([np.nanmean(l) for l in acc_list])
-                # acc +=avg_acc
-
             if args.rank == 0:
                 print(
                     "Val {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(loader)),
@@ -308,10 +268,9 @@ def val_epoch(model, loader, epoch, acc_func, args, model_inferer, post_label=No
             start_time = time.time()
     all_trp = np.nan_to_num(all_trp/(idx+1), nan=0.01)
     return avg_acc,all_trp
-    # return avg_acc
 
 
-def save_checkpoint(model, epoch, args, filename="UGML_w1_flare.pt", best_acc=0, optimizer=None, scheduler=None):
+def save_checkpoint(model, epoch, args, filename="UGML.pt", best_acc=0, optimizer=None, scheduler=None):
     state_dict = model.state_dict() if not args.distributed else model.module.state_dict()
     save_dict = {"epoch": epoch, "best_acc": best_acc, "state_dict": state_dict}
     if optimizer is not None:
@@ -343,7 +302,7 @@ def run_training(
         if args.rank == 0:
             print("Writing Tensorboard logs to ", args.logdir)
     scaler = None
-    # 判定是否启用混合精度训练
+
     if args.amp:
         scaler = GradScaler()
     val_acc_max = 0.0
@@ -354,10 +313,9 @@ def run_training(
             train_loader.sampler.set_epoch(epoch)
             torch.distributed.barrier()
         print(args.rank, time.ctime(), "Epoch:", epoch)
-        # if epoch > 30:
-        #     xiWeight = 0.5*(1 + math.cos(0.1 * math.pi * (epoch - 30)))
+
         epoch_time = time.time()
-        #  
+  
         train_loss,b_mass = train_epoch(
                 model, train_loader, optimizer, scaler=scaler, epoch=epoch, loss_func=loss_func, tau=g_tau,args=args
             )
@@ -377,7 +335,7 @@ def run_training(
             if args.distributed:
                 torch.distributed.barrier()
             epoch_time = time.time()
-            # 
+            
             val_avg_acc,all_trp = val_epoch(
                 model,
                 val_loader,
@@ -389,7 +347,6 @@ def run_training(
                 post_pred=post_pred,
             )
             g_tau = USAT(g_tau,all_trp)
-            print("tau_mean:",np.mean(g_tau))
             if args.rank == 0:
                 print(
                     "Final validation  {}/{}".format(epoch, args.max_epochs - 1),
@@ -408,10 +365,10 @@ def run_training(
                             model, epoch, args, best_acc=val_acc_max, optimizer=optimizer, scheduler=scheduler
                         )
             if args.rank == 0 and args.logdir is not None and args.save_checkpoint:
-                save_checkpoint(model, epoch, args, best_acc=val_acc_max, filename="UGML_w1_flare_final.pt")
+                save_checkpoint(model, epoch, args, best_acc=val_acc_max, filename="UGML_final.pt")
                 if b_new_best:
                     print("Copying to model.pt new best model!!!!")
-                    shutil.copyfile(os.path.join(args.logdir, "UGML_w1_flare_final.pt"), os.path.join(args.logdir, "UGML_w1_flare.pt"))
+                    shutil.copyfile(os.path.join(args.logdir, "UGML_final.pt"), os.path.join(args.logdir, "UGML.pt"))
 
         if scheduler is not None:
             scheduler.step()
@@ -419,202 +376,5 @@ def run_training(
         #     exit()
 
     print("Training Finished !, Best Accuracy: ", val_acc_max)
-
-    return val_acc_max
-
-
-def run_training_v2(
-    model,
-    ConsNet,
-    train_loader,
-    val_loader,
-    all_train_loader,   #后来加的，正常训练时候可以删除
-    optimizer,
-    loss_func,
-    acc_func,
-    args,
-    model_inferer=None,
-    scheduler=None,
-    start_epoch=0,
-    post_label=None,
-    post_pred=None,
-):
-    writer = True
-    if args.logdir is not None and args.rank == 0:
-        writer = SummaryWriter(log_dir=args.logdir)
-        if args.rank == 0:
-            print("Writing Tensorboard logs to ", args.logdir)
-    scaler = None
-    # 判定是否启用混合精度训练
-    if args.amp:
-        scaler = GradScaler()
-    val_acc_max = 0.0
-
-    InterSize = len(train_loader)
-    train_loader = cycle(train_loader)
-    # Data Discernment 所需要的东西
-    xi = 0.05
-    xiRate = 1e-4
-    xiWeight = 1.0
-    tempLossInternal = torch.ones(InterSize).cuda(args.rank)
-    tempLossExternal = torch.ones(len(all_train_loader)).cuda(args.rank)
-    batch_size = args.batch_size
-    idxInter = 0
-    
-    for epoch in range(start_epoch, args.max_epochs):
-        print(args.rank, time.ctime(), "Epoch:", epoch)
-        epoch_time = time.time()
-        run_loss = AverageMeter()
-        model.train()
-        if epoch > 240:
-            xiWeight = 0.5*(1 + math.cos(0.1 * math.pi * (epoch - 30)))
-        if epoch < 80:
-            # continue
-            start_time = time.time()
-            for idx, batch_data in enumerate(all_train_loader,0):
-                data, target, flag = batch_data["image"], batch_data["label"], batch_data["flag"]
-                data, target = data.cuda(args.rank), target.cuda(args.rank)
-                sampleNum = data.size(0)
-                
-                
-                logits = model(data)
-                loss = loss_func(logits, target)
-                tempLossExternal[idx * args.batch_size:idx * args.batch_size + sampleNum] = loss.detach()
-                
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                run_loss.update(loss.item(), n=args.batch_size)
-
-                if args.rank == 0:
-                    print(
-                        "Epoch {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(all_train_loader)),
-                        "loss: {:.4f}".format(run_loss.avg),
-                        "time {:.2f}s".format(time.time() - start_time),
-                    )
-                start_time = time.time()
-            
-        elif (epoch >= 80) & (epoch < 160):
-            start_time = time.time()
-            for idx, batch_data in enumerate(all_train_loader,0):
-                data, target, flag = batch_data["image"], batch_data["label"], batch_data["flag"]
-                data, target = data.cuda(args.rank), target.cuda(args.rank)
-                for param in model.parameters():
-                    param.grad = None
-                with autocast(enabled=args.amp):
-                    logits = model(data)
-                    loss = loss_func(logits, target)
-                    weight = torch.ones_like(loss)
-                if flag.sum() > 0:
-                    batch_dataVal = next(train_loader)
-                    dataVal, targetVal = batch_dataVal["image"], batch_dataVal["label"]
-                    dataVal, targetVal = dataVal.cuda(args.rank), targetVal.cuda(args.rank)
-                    numInter = dataVal.size(0)
-                    sampleNum = data.size(0)
-                    with torch.no_grad():
-                        outputVal = model(dataVal)
-                    lossVal = loss_func(outputVal, targetVal)
-                    tempValMean = tempLossInternal.mean() - (tempLossInternal[idxInter * batch_size:idxInter * batch_size + numInter] - lossVal).mean()
-                    tempExter = tempLossExternal[idx * batch_size: idx * batch_size + sampleNum] - loss.detach()
-                    cost = abs((loss.detach() - tempValMean) * tempExter)
-                    costReal = cost[flag > 0]
-                    tempLossInternal[idxInter * batch_size: idxInter * batch_size + numInter] = lossVal
-                    tempLossExternal[idx * batch_size: idx * batch_size + sampleNum] = loss.detach()
-                    if idxInter * batch_size + numInter > InterSize - 1:
-                        idxInter = 0
-                    else:
-                        idxInter += 1
-                    weightTemp = weightOptim(cost=costReal.numpy(), balance=args.reg_weight)
-                    weight[flag > 0] = torch.from_numpy(weightTemp).type(torch.float)
-                loss = (loss * weight).mean()
-                if args.amp:
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    optimizer.step()
-                run_loss.update(loss.item(), n=args.batch_size)
-
-                if args.rank == 0:
-                    print(
-                        "Epoch {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(all_train_loader)),
-                        "loss: {:.4f}".format(run_loss.avg),
-                        "time {:.2f}s".format(time.time() - start_time),
-                    )
-                start_time = time.time()
-        else:
-            start_time = time.time()
-            for idx, batch_data in enumerate(all_train_loader,0):
-                data, target, flag = batch_data["image"], batch_data["label"], batch_data["flag"]
-                data, target = data.cuda(args.rank), target.cuda(args.rank)
-                for param in model.parameters():
-                    param.grad = None
-                with autocast(enabled=args.amp):
-                    logits = model(data)
-                    loss = loss_func(logits, target)
-                    weight = torch.ones_like(loss)
-                if flag.sum() > 0:
-                    batch_dataVal = next(train_loader)
-                    dataVal, targetVal = batch_dataVal["image"], batch_dataVal["label"]
-                    dataVal, targetVal = dataVal.cuda(args.rank), targetVal.cuda(args.rank)
-                    numInter = dataVal.size(0)
-                    sampleNum = data.size(0)
-                    # 验证模式
-                    with torch.no_grad():
-                        outputsVal = model(dataVal)
-                    lossVal = loss_func(outputsVal, targetVal)
-                    tempValMean = tempLossInternal.mean() - (tempLossInternal[idxInter * batch_size:idxInter * batch_size + numInter] - lossVal).mean()
-                    tempExter = tempLossExternal[idx * batch_size: idx * batch_size + sampleNum] - loss.detach()
-                    cost = abs((loss.detach() - tempValMean) * tempExter)
-                    costReal = cost[flag > 0]
-                    tempLossInternal[idxInter * batch_size: idxInter * batch_size + numInter] = lossVal
-                    tempLossExternal[idx * batch_size: idx * batch_size + sampleNum] = loss.detach()
-                    if idxInter * batch_size + numInter > InterSize - 1:
-                        idxInter = 0
-                    else:
-                        idxInter += 1
-                    weightTemp = weightOptim(cost=costReal.numpy(), balance=args.reg_weight)
-                    weight[flag > 0] = torch.from_numpy(weightTemp).type(torch.float)
-                
-                if flag.sum() < data.size(0):
-                    with torch.no_grad():
-                        outputCons = ConsNet(data)
-                    lossCon = loss_func(outputCons,target)
-                    lossCon = (loss - lossCon) * (1 - flag)
-                    lossCon = lossCon[lossCon > 0]
-                    if len(lossCon) > 0:
-                        lossCon = lossCon.mean()
-                        xiUpdate = lossCon.detach().item()
-                    else:
-                        lossCon = 0
-                        xiUpdate = 0
-                else:
-                    lossCon = 0
-                    xiUpdate = 0
-                loss = (weight * loss).mean() + xiWeight * xi * lossCon
-                if args.amp:
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    optimizer.step()
-                xi += xiRate * xiUpdate
-                run_loss.update(loss.item(), n=args.batch_size)
-                if args.rank == 0:
-                        print(
-                            "Epoch {}/{} {}/{}".format(epoch, args.max_epochs, idx, len(all_train_loader)),
-                            "loss: {:.4f}".format(run_loss.avg),
-                            "time {:.2f}s".format((time.time() - start_time)),
-                        )
-                start_time = time.time()
-            # 梯度清零
-            for param in model.parameters():
-                param.grad = None
-        print("Epoch: %02d  ||  Loss: %.4f  ||  Time elapsed: %.2f(min)"
-              % (epoch + 1, run_loss.sum, (time.time() - epoch_time) / 60))
-    save_checkpoint(model, epoch, args, best_acc=1.0, filename="nnUNet_data_discernment.pt")
-    print("Training Finished !")
 
     return val_acc_max
