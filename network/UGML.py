@@ -195,14 +195,6 @@ class UGML(nn.Module):
             upsample: upsampling mode, available options are
                 ``"deconv"``, ``"pixelshuffle"``, ``"nontrainable"``.
 
-        .. deprecated:: 0.6.0
-            ``dimensions`` is deprecated, use ``spatial_dims`` instead.
-
-        See Also
-
-            - :py:class:`monai.networks.nets.DynUNet`
-            - :py:class:`monai.networks.nets.UNet`
-
         """
         super().__init__()
         if dimensions is not None:
@@ -222,12 +214,6 @@ class UGML(nn.Module):
         self.upcat_1 = UpCat(spatial_dims, fea[1], fea[0], fea[5], act, norm, bias, dropout, upsample, halves=False)
 
         self.final_conv = Conv["conv", spatial_dims](fea[5], out_channels, kernel_size=1)
-        #deepsuper
-        # self.gt_conv5 = Conv["conv", spatial_dims](fea[4], out_channels, kernel_size=1)
-        # self.gt_conv4 = Conv["conv", spatial_dims](fea[3], out_channels, kernel_size=1)
-        # self.gt_conv3 = Conv["conv", spatial_dims](fea[2], out_channels, kernel_size=1)
-        # self.gt_conv2 = Conv["conv", spatial_dims](fea[1], out_channels, kernel_size=1)
-        # self.outconv = Conv["conv", spatial_dims](out_channels*5, out_channels, kernel_size=1)
 
         self.gt_conv5 = nn.Sequential(nn.Conv3d(fea[4], 1, 1))
         self.gt_conv4 = nn.Sequential(nn.Conv3d(fea[3], 1, 1))
@@ -274,20 +260,11 @@ class UGML(nn.Module):
         gt_3 = self.gt_conv3(d3)
         gt_2 = self.gt_conv2(d2)
 
-        # m1 = self.infer(d0)
-        # gt_5 = self.infer(gt_5)
-        # gt_4 = self.infer(gt_4)
-        # gt_3 = self.infer(gt_3)
-        # gt_2 = self.infer(gt_2)
 
         m5 = F.interpolate(gt_5, scale_factor=16, mode='trilinear', align_corners=True)
         m4 = F.interpolate(gt_4, scale_factor=8, mode='trilinear', align_corners=True)
         m3 = F.interpolate(gt_3, scale_factor=4, mode='trilinear', align_corners=True)
         m2 = F.interpolate(gt_2, scale_factor=2, mode='trilinear', align_corners=True)
-
-
-        # out = torch.cat((m5, m4, m3, m2, m1),1 ).sum(dim=1)
-        # out = m1+m2+m3+m4+m5
 
         m = torch.cat((m5, m4, m3, m2, d0), 1)
         out = self.outconv(m)
